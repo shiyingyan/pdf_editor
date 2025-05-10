@@ -1,0 +1,6 @@
+numpy
+PyPDF2
+pdf2image
+pillow
+eel
+pyinstaller

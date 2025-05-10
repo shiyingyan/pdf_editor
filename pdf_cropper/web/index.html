@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Cropper</title>
+    <script type="text/javascript" src="/eel.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(rgba(245, 247, 250, 0.9), rgba(245, 247, 250, 0.9)),
+                        url('data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAAAAAAAD/4QAuRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAAqADAAQAAAABAAAAAAABAAAD6AAAAAD/2wBDAAoHBwkHBgoJCAkLCwoMDxkQDw4ODx4WFxIZJCAmJSMgIyMjJiAnJCUkIx8lLCIuMjIyPCsxJj0zFiUzQDM0NjP/2wBDAQsLCw0NDxkQEBkyFiIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjP/wgARCAAOABkDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAQMF/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAH/2gAMAwEAAhADEAAAAVKyA//EABgQAQEBAQEAAAAAAAAAAAAAAAECAAMR/9oACAEBAAEFAm2W7jS6s//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//EABgQAQEAAwAAAAAAAAAAAAAAAAERACFR/9oACAEBAAY/AmO3Q3//xAAYEAEBAQAAAAAAAAAAAAAAAAAAAREh/9oACAEBAAE/IdqdwP/aAAwDAQACAAMAAAAQsw//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAYEAEBAAMAAAAAAAAAAAAAAAABEQAhUf/aAAgBAQABPxC3Ldo4j//Z') center/cover no-repeat;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            max-width: 900px;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            font-size: 2rem;
+            margin-bottom: 20px;
+        }
+        .file-info {
+            color: #555;
+            margin: 10px 0;
+            font-size: 0.9rem;
+        }
+        .canvas-container, .preview-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            margin: 20px auto;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            background: #f8f9fa;
+        }
+        canvas {
+            border: 1px solid #ddd;
+            display: block;
+        }
+        #preview {
+            max-width: 100%;
+            display: block;
+        }
+        .instructions {
+            color: #666;
+            font-size: 0.85rem;
+            margin-bottom: 10px;
+        }
+        .button-group {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s, transform 0.2s;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        button:hover {
+            background: #0056b3;
+            transform: scale(1.05);
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        .preview-label {
+            font-size: 0.9rem;
+            color: #333;
+            margin-top: 10px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PDF Cropper</h1>
+        <button onclick="selectPDF()">Select PDF</button>
+        <p class="file-info" id="fileInfo"></p>
+        <div class="canvas-container">
+            <p class="instructions">Left-click to pan, Alt + Drag to select crop regions</p>
+            <canvas id="canvas"></canvas>
+        </div>
+        <div class="button-group">
+            <button onclick="confirmCrop()">Confirm Crop</button>
+            <button onclick="savePDF()">Save Cropped PDF</button>
+            <button onclick="resetCanvas()">Reset</button>
+        </div>
+        <div class="preview-container" id="preview-container" style="display: none;">
+            <p class="preview-label">Preview (Shift + Drag to pan independently)</p>
+            <img id="preview">
+        </div>
+    </div>
+
+    <script>
+        let pdfPath = null;
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let previewContainer = document.getElementById('preview-container');
+        let previewImg = document.getElementById('preview');
+        let startX, startY, endX, endY;
+        let isDrawing = false;
+        let isPanningCanvas = false;
+        let isPanningPreview = false;
+        let img = new Image();
+        let cropRegions = [];
+        let offsetX = 0, offsetY = 0;
+        let previewOffsetX = 0, previewOffsetY = 0;
+        let lastX, lastY;
+        let pageCount = 0;
+        const EDGE_MARGIN = 50; // Pixels from edge to trigger panning
+        const PAN_SPEED = 10; // Pixels per frame
+
+        async function selectPDF() {
+            let result = await eel.select_pdf()();
+            if (result && result.path) {
+                pdfPath = result.path;
+                document.getElementById('fileInfo').innerText = `Selected: ${pdfPath}`;
+                img.src = 'data:image/png;base64,' + result.image;
+                img.onload = () => {
+                    canvas.width = 800; // Fixed canvas size
+                    canvas.height = 600;
+                    offsetX = 0;
+                    offsetY = 0;
+                    cropRegions = [];
+                    drawCanvas();
+                };
+                previewContainer.style.display = 'none';
+                previewOffsetX = 0;
+                previewOffsetY = 0;
+                previewImg.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px)`;
+            }
+        }
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, offsetX, offsetY);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            cropRegions.forEach(region => {
+                let [x1, y1, x2, y2] = region;
+                ctx.strokeRect(x1 + offsetX, y1 + offsetY, x2 - x1, y2 - y1);
+            });
+            if (isDrawing) {
+                ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+            }
+            // Update preview position if visible
+            if (previewContainer.style.display !== 'none') {
+                previewImg.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px)`;
+            }
+        }
+
+        canvas.onmousedown = (e) => {
+            let rect = canvas.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+
+            if (e.altKey) {
+                isDrawing = true;
+                startX = x;
+                startY = y;
+            } else {
+                isPanningCanvas = true;
+                lastX = x;
+                lastY = y;
+            }
+        };
+
+        canvas.onmousemove = (e) => {
+            let rect = canvas.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+
+            // Edge-based panning for canvas and preview
+            let panX = 0, panY = 0;
+            if (x < EDGE_MARGIN) {
+                panX = PAN_SPEED * (EDGE_MARGIN - x) / EDGE_MARGIN;
+            } else if (x > canvas.width - EDGE_MARGIN) {
+                panX = -PAN_SPEED * (x - (canvas.width - EDGE_MARGIN)) / EDGE_MARGIN;
+            }
+            if (y < EDGE_MARGIN) {
+                panY = PAN_SPEED * (EDGE_MARGIN - y) / EDGE_MARGIN;
+            } else if (y > canvas.height - EDGE_MARGIN) {
+                panY = -PAN_SPEED * (y - (canvas.height - EDGE_MARGIN)) / EDGE_MARGIN;
+            }
+            if (panX !== 0 || panY !== 0) {
+                offsetX += panX;
+                offsetY += panY;
+                offsetX = Math.min(0, Math.max(offsetX, canvas.width - img.width));
+                offsetY = Math.min(0, Math.max(offsetY, canvas.height - img.height));
+                if (previewContainer.style.display !== 'none') {
+                    previewOffsetX += panX;
+                    previewOffsetY += panY;
+                    previewOffsetX = Math.min(0, Math.max(previewOffsetX, previewContainer.offsetWidth - previewImg.width));
+                    previewOffsetY = Math.min(0, Math.max(previewOffsetY, previewContainer.offsetHeight - previewImg.height));
+                }
+                drawCanvas();
+            }
+
+            // Manual panning with left-click drag for canvas and preview
+            if (isPanningCanvas) {
+                let deltaX = x - lastX;
+                let deltaY = y - lastY;
+                offsetX += deltaX;
+                offsetY += deltaY;
+                lastX = x;
+                lastY = y;
+                offsetX = Math.min(0, Math.max(offsetX, canvas.width - img.width));
+                offsetY = Math.min(0, Math.max(offsetY, canvas.height - img.height));
+                if (previewContainer.style.display !== 'none') {
+                    previewOffsetX += deltaX;
+                    previewOffsetY += deltaY;
+                    previewOffsetX = Math.min(0, Math.max(previewOffsetX, previewContainer.offsetWidth - previewImg.width));
+                    previewOffsetY = Math.min(0, Math.max(previewOffsetY, previewContainer.offsetHeight - previewImg.height));
+                }
+                drawCanvas();
+            } else if (isDrawing && e.altKey) {
+                endX = x;
+                endY = y;
+                drawCanvas();
+            }
+        };
+
+        canvas.onmouseup = (e) => {
+            if (isDrawing) {
+                let x1 = Math.min(startX, endX) - offsetX;
+                let y1 = Math.min(startY, endY) - offsetY;
+                let x2 = Math.max(startX, endX) - offsetX;
+                let y2 = Math.max(startY, endY) - offsetY;
+                cropRegions.push([x1, y1, x2, y2]);
+                isDrawing = false;
+                drawCanvas();
+            }
+            isPanningCanvas = false;
+        };
+
+        canvas.onwheel = (e) => {
+            e.preventDefault();
+            // Optional: Could add zoom functionality here
+        };
+
+        previewContainer.onmousedown = (e) => {
+            let rect = previewContainer.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+
+            if (e.shiftKey) {
+                isPanningPreview = true;
+                lastX = x;
+                lastY = y;
+            }
+        };
+
+        previewContainer.onmousemove = (e) => {
+            let rect = previewContainer.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+
+            // Edge-based panning for preview (independent)
+            let panX = 0, panY = 0;
+            if (x < EDGE_MARGIN) {
+                panX = PAN_SPEED * (EDGE_MARGIN - x) / EDGE_MARGIN;
+            } else if (x > previewContainer.offsetWidth - EDGE_MARGIN) {
+                panX = -PAN_SPEED * (x - (previewContainer.offsetWidth - EDGE_MARGIN)) / EDGE_MARGIN;
+            }
+            if (y < EDGE_MARGIN) {
+                panY = PAN_SPEED * (EDGE_MARGIN - y) / EDGE_MARGIN;
+            } else if (y > previewContainer.offsetHeight - EDGE_MARGIN) {
+                panY = -PAN_SPEED * (y - (previewContainer.offsetHeight - EDGE_MARGIN)) / EDGE_MARGIN;
+            }
+            if (panX !== 0 || panY !== 0) {
+                previewOffsetX += panX;
+                previewOffsetY += panY;
+                previewOffsetX = Math.min(0, Math.max(previewOffsetX, previewContainer.offsetWidth - previewImg.width));
+                previewOffsetY = Math.min(0, Math.max(previewOffsetY, previewContainer.offsetHeight - previewImg.height));
+                previewImg.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px)`;
+            }
+
+            // Manual panning with Shift + drag for preview (independent)
+            if (isPanningPreview || e.shiftKey) {
+                if (isPanningPreview) {
+                    previewOffsetX += x - lastX;
+                    previewOffsetY += y - lastY;
+                    lastX = x;
+                    lastY = y;
+                    previewOffsetX = Math.min(0, Math.max(previewOffsetX, previewContainer.offsetWidth - previewImg.width));
+                    previewOffsetY = Math.min(0, Math.max(previewOffsetY, previewContainer.offsetHeight - previewImg.height));
+                    previewImg.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px)`;
+                } else if (e.shiftKey) {
+                    isPanningPreview = true;
+                    lastX = x;
+                    lastY = y;
+                }
+            }
+        };
+
+        previewContainer.onmouseup = (e) => {
+            isPanningPreview = false;
+        };
+
+        previewContainer.onwheel = (e) => {
+            e.preventDefault();
+            // Optional: Could add zoom functionality here
+        };
+
+        async function confirmCrop() {
+            if (!pdfPath || cropRegions.length === 0) return;
+            let result = await eel.crop_pdf(pdfPath, cropRegions)();
+            if (result.image) {
+                previewImg.src = 'data:image/png;base64,' + result.image;
+                previewContainer.style.display = 'block';
+                previewOffsetX = 0;
+                previewOffsetY = 0;
+                previewImg.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px)`;
+                pageCount = result.page_count || 0;
+            }
+            if (result.error) {
+                alert(`Error: ${result.error}`);
+            }
+        }
+
+        async function savePDF() {
+            if (!pdfPath || pageCount === 0) {
+                alert("No pages to save. Please confirm crop first.");
+                return;
+            }
+            let pagesInput = prompt(`Enter page numbers to save (1-${pageCount}, e.g., "1,3,5-7" for pages 1, 3, 5, 6, 7):`, `1-${pageCount}`);
+            if (!pagesInput) return;
+
+            // Parse page numbers
+            let selectedPages = [];
+            let parts = pagesInput.split(',');
+            for (let part of parts) {
+                part = part.trim();
+                if (part.includes('-')) {
+                    let [start, end] = part.split('-').map(num => parseInt(num.trim()));
+                    if (isNaN(start) || isNaN(end) || start < 1 || end > pageCount || start > end) {
+                        alert("Invalid page range. Please use valid numbers.");
+                        return;
+                    }
+                    for (let i = start; i <= end; i++) {
+                        selectedPages.push(i - 1); // Convert to 0-based index
+                    }
+                } else {
+                    let page = parseInt(part);
+                    if (isNaN(page) || page < 1 || page > pageCount) {
+                        alert("Invalid page number. Please use valid numbers.");
+                        return;
+                    }
+                    selectedPages.push(page - 1); // Convert to 0-based index
+                }
+            }
+
+            // Remove duplicates and sort
+            selectedPages = [...new Set(selectedPages)].sort((a, b) => a - b);
+
+            let savePath = await eel.save_cropped_pdf('temp_cropped.pdf', selectedPages)();
+            if (savePath) {
+                alert(`Saved to: ${savePath}`);
+                cropRegions = [];
+                offsetX = 0;
+                offsetY = 0;
+                previewOffsetX = 0;
+                previewOffsetY = 0;
+                drawCanvas();
+                previewContainer.style.display = 'none';
+            } else if (savePath && savePath.error) {
+                alert(`Error: ${savePath.error}`);
+            }
+        }
+
+        function resetCanvas() {
+            cropRegions = [];
+            offsetX = 0;
+            offsetY = 0;
+            previewOffsetX = 0;
+            previewOffsetY = 0;
+            pageCount = 0;
+            drawCanvas();
+            previewContainer.style.display = 'none';
+            previewImg.style.transform = `translate(${previewOffsetX}px, ${previewOffsetY}px)`;
+        }
+    </script>
+</body>
+</html>
